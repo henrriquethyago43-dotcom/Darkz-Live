@@ -1,0 +1,6 @@
+{
+  "name": "DARKZ LIVE",
+  "description": "Aplicativo Android nativo para lives interativas com o jogo arcade DARKZ BATTLE em Jetpack Compose e Kotlin.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,14 @@
+<resources>
+    <!-- DARKZ LIVE Palette: Black, Crimson Red, Pure White, Cyber Accents -->
+    <color name="darkz_background">#050507</color>
+    <color name="darkz_surface">#0F0F14</color>
+    <color name="darkz_surface_variant">#1A1A24</color>
+    <color name="darkz_primary_red">#E50914</color>
+    <color name="darkz_crimson">#B8000A</color>
+    <color name="darkz_red_neon">#FF1A2A</color>
+    <color name="darkz_white">#FFFFFF</color>
+    <color name="darkz_gray_light">#E0E0E6</color>
+    <color name="darkz_gray_muted">#8A8A99</color>
+    <color name="darkz_cyber_cyan">#00F0FF</color>
+    <color name="darkz_warning_amber">#FFB800</color>
+</resources>

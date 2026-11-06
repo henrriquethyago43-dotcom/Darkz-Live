@@ -1,0 +1,11 @@
+<resources>
+    <string name="app_name">DARKZ LIVE</string>
+    <string name="start_live">INICIAR LIVE</string>
+    <string name="choose_game">ESCOLHER JOGO</string>
+    <string name="event_center">CENTRAL DE EVENTOS</string>
+    <string name="settings">CONFIGURAÇÕES</string>
+    <string name="system_status">STATUS DO SISTEMA</string>
+    <string name="connection_status">CONEXÃO</string>
+    <string name="last_activity">ÚLTIMA ATIVIDADE</string>
+    <string name="darkz_battle">DARKZ BATTLE</string>
+</resources>
