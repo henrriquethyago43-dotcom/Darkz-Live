@@ -2,7 +2,6 @@ package com.darkz.live.games.darkzbattle
 
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import java.util.UUID
 
 data class Spacecraft(
     var x: Float = 0f,
@@ -32,7 +31,6 @@ enum class EnemyType {
 }
 
 data class Enemy(
-    val id: String = UUID.randomUUID().toString(),
     var x: Float,
     var y: Float,
     var vx: Float,
@@ -48,7 +46,6 @@ data class Enemy(
 )
 
 data class Boss(
-    val id: String = UUID.randomUUID().toString(),
     val name: String = "DARKZ GOLIATH",
     var x: Float,
     var y: Float,
@@ -64,7 +61,6 @@ data class Boss(
 )
 
 data class Projectile(
-    val id: String = UUID.randomUUID().toString(),
     var x: Float,
     var y: Float,
     var vx: Float,
@@ -89,7 +85,6 @@ data class Particle(
 )
 
 data class FloatingNotice(
-    val id: String = UUID.randomUUID().toString(),
     val text: String,
     var x: Float,
     var y: Float,

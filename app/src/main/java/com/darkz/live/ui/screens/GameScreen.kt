@@ -81,6 +81,7 @@ fun GameScreen(
     val isPaused by engine.isPaused.collectAsState()
 
     var canvasSize by remember { mutableStateOf(Size.Zero) }
+    var frameTick by remember { mutableStateOf(0) }
 
     // Connect event manager flow to game engine
     LaunchedEffect(Unit) {
@@ -89,18 +90,16 @@ fun GameScreen(
         }
     }
 
-    // Main 60 FPS Game Loop
-    LaunchedEffect(canvasSize) {
-        if (canvasSize.width > 0 && canvasSize.height > 0) {
-            engine.initGame(canvasSize.width, canvasSize.height)
-            var lastTime = System.currentTimeMillis()
-            while (isActive) {
-                val now = System.currentTimeMillis()
-                val delta = now - lastTime
-                lastTime = now
-                engine.update(delta)
-                kotlinx.coroutines.delay(16L) // ~60 FPS
-            }
+    // Main 60 FPS Game Loop with smooth canvas invalidation
+    LaunchedEffect(Unit) {
+        var lastTime = System.currentTimeMillis()
+        while (isActive) {
+            val now = System.currentTimeMillis()
+            val delta = now - lastTime
+            lastTime = now
+            engine.update(delta)
+            frameTick++
+            kotlinx.coroutines.delay(16L) // ~60 FPS
         }
     }
 
@@ -120,7 +119,11 @@ fun GameScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .onSizeChanged { size ->
-                    canvasSize = Size(size.width.toFloat(), size.height.toFloat())
+                    val newSize = Size(size.width.toFloat(), size.height.toFloat())
+                    if (canvasSize != newSize && newSize.width > 0f && newSize.height > 0f) {
+                        canvasSize = newSize
+                        engine.initGame(newSize.width, newSize.height)
+                    }
                 }
                 .pointerInput(Unit) {
                     detectDragGestures { change, _ ->
@@ -136,6 +139,7 @@ fun GameScreen(
                     )
                 }
         ) {
+            val _tick = frameTick // Read frameTick to trigger redraw on every frame
             engine.render(this)
         }
 
@@ -236,7 +240,7 @@ fun GameScreen(
             }
         }
 
-        // Bottom In-Game Event Simulator Bar (Allows instant testing during live battle!)
+        // Bottom In-Game Event Simulator Bar
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)

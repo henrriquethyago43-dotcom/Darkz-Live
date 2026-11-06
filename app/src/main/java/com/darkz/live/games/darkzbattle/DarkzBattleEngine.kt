@@ -5,7 +5,6 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
 import com.darkz.live.events.LiveEvent
 import com.darkz.live.events.LiveEventType
@@ -52,6 +51,7 @@ class DarkzBattleEngine : GameEngine {
     // World & dimensions
     private var width: Float = 1080f
     private var height: Float = 1920f
+    private var isInitialized = false
 
     // Entities
     private var player = Spacecraft()
@@ -67,12 +67,18 @@ class DarkzBattleEngine : GameEngine {
     private var spawnCooldown = 0L
     private var waveKillCount = 0
     private var comboMultiplier = 1
-    private var comboTimer = 0L
     private var screenShake = 0f
 
+    // Reusable paths to prevent GC pressure during render
+    private val sharedPlayerPath = Path()
+    private val sharedFlamePath = Path()
+    private val sharedEnemyPath = Path()
+    private val sharedBossPath = Path()
+
     override fun initGame(screenWidth: Float, screenHeight: Float) {
-        width = screenWidth.coerceAtLeast(360f)
-        height = screenHeight.coerceAtLeast(640f)
+        if (screenWidth <= 0f || screenHeight <= 0f) return
+        width = screenWidth
+        height = screenHeight
 
         player = Spacecraft(
             x = width / 2f,
@@ -89,7 +95,7 @@ class DarkzBattleEngine : GameEngine {
 
         // Generate starfield
         stars.clear()
-        for (i in 0 until 60) {
+        for (i in 0 until 45) {
             stars.add(Offset(Random.nextFloat() * width, Random.nextFloat() * height))
         }
 
@@ -101,24 +107,27 @@ class DarkzBattleEngine : GameEngine {
 
         waveKillCount = 0
         comboMultiplier = 1
+        isInitialized = true
     }
 
     override fun update(deltaTimeMs: Long) {
-        if (_isPaused.value || _isGameOver.value) return
+        if (!isInitialized || _isPaused.value || _isGameOver.value) return
 
         val dt = (deltaTimeMs.coerceIn(8L, 33L)).toFloat() / 1000f
 
         // Decay screen shake
-        if (screenShake > 0) {
+        if (screenShake > 0f) {
             screenShake = (screenShake - dt * 25f).coerceAtLeast(0f)
         }
 
         // Update player timers
         if (player.specialLaserTimer > 0) {
             player.specialLaserTimer -= deltaTimeMs
+            if (player.specialLaserTimer < 0) player.specialLaserTimer = 0L
         }
         if (player.invincibleTimer > 0) {
             player.invincibleTimer -= deltaTimeMs
+            if (player.invincibleTimer < 0) player.invincibleTimer = 0L
         }
 
         // Auto firing
@@ -171,14 +180,12 @@ class DarkzBattleEngine : GameEngine {
             // Check if passed screen bottom
             if (enemy.y > height + 50f) {
                 enemyIterator.remove()
-                // Player takes small penalty for breach
                 damagePlayer(5f)
             }
         }
 
         // Update Boss
         activeBoss?.let { boss ->
-            // Move boss smoothly
             boss.x += (boss.targetX - boss.x) * (dt * 2f)
             if (kotlin.math.abs(boss.targetX - boss.x) < 20f) {
                 boss.targetX = Random.nextFloat() * (width - boss.width) + (boss.width / 2f)
@@ -207,20 +214,23 @@ class DarkzBattleEngine : GameEngine {
             // Player projectile collisions
             if (p.isPlayer) {
                 // Check boss collision
+                var hitHandled = false
                 activeBoss?.let { boss ->
                     if (p.x >= boss.x - boss.width / 2 && p.x <= boss.x + boss.width / 2 &&
                         p.y >= boss.y - boss.height / 2 && p.y <= boss.y + boss.height / 2
                     ) {
                         boss.health -= p.damage
-                        createSparks(p.x, p.y, DarkzRedNeon, 4)
+                        createSparks(p.x, p.y, DarkzRedNeon, 3)
                         projIterator.remove()
+                        hitHandled = true
 
                         if (boss.health <= 0f) {
                             defeatBoss(boss)
                         }
-                        return@let
                     }
                 }
+
+                if (hitHandled) continue
 
                 // Check enemies collision
                 val hitEnemy = enemies.find { e ->
@@ -229,7 +239,7 @@ class DarkzBattleEngine : GameEngine {
 
                 if (hitEnemy != null) {
                     hitEnemy.health -= p.damage
-                    createSparks(p.x, p.y, hitEnemy.type.let { DarkzCyanNeon }, 3)
+                    createSparks(p.x, p.y, DarkzCyanNeon, 2)
                     projIterator.remove()
 
                     if (hitEnemy.health <= 0f) {
@@ -241,7 +251,7 @@ class DarkzBattleEngine : GameEngine {
                 // Enemy projectile hits player
                 if (hypot(p.x - player.x, p.y - player.y) < (player.width / 2 + p.radius)) {
                     damagePlayer(p.damage)
-                    createSparks(p.x, p.y, DarkzRedPrimary, 6)
+                    createSparks(p.x, p.y, DarkzRedPrimary, 4)
                     projIterator.remove()
                     continue
                 }
@@ -258,7 +268,11 @@ class DarkzBattleEngine : GameEngine {
             }
         }
 
-        // Update Particles
+        // Update Particles (Cap at 80 to prevent memory lag)
+        if (particles.size > 80) {
+            particles.subList(0, particles.size - 80).clear()
+        }
+
         val partIterator = particles.iterator()
         while (partIterator.hasNext()) {
             val part = partIterator.next()
@@ -293,27 +307,26 @@ class DarkzBattleEngine : GameEngine {
             )
 
             // Starfield
-            for (s in stars) {
+            for (i in stars.indices) {
                 drawCircle(
                     color = Color.White.copy(alpha = 0.5f),
                     radius = 1.5f,
-                    center = s
+                    center = stars[i]
                 )
             }
 
-            // Screen shake translation
             // Render Projectiles
-            for (p in projectiles) {
+            for (i in projectiles.indices) {
+                val p = projectiles[i]
                 if (p.isPlayer) {
                     drawCircle(
                         color = p.color,
                         radius = p.radius,
                         center = Offset(p.x, p.y)
                     )
-                    // Glow trail
                     drawCircle(
                         color = p.color.copy(alpha = 0.4f),
-                        radius = p.radius * 2.2f,
+                        radius = p.radius * 2f,
                         center = Offset(p.x, p.y)
                     )
                 } else {
@@ -326,8 +339,8 @@ class DarkzBattleEngine : GameEngine {
             }
 
             // Render Enemies
-            for (enemy in enemies) {
-                renderEnemy(this, enemy)
+            for (i in enemies.indices) {
+                renderEnemy(this, enemies[i])
             }
 
             // Render Boss
@@ -339,7 +352,8 @@ class DarkzBattleEngine : GameEngine {
             renderPlayer(this, player)
 
             // Render Particles
-            for (part in particles) {
+            for (i in particles.indices) {
+                val part = particles[i]
                 drawCircle(
                     color = part.color.copy(alpha = part.alpha),
                     radius = part.radius,
@@ -355,29 +369,26 @@ class DarkzBattleEngine : GameEngine {
             val halfW = p.width / 2f
             val halfH = p.height / 2f
 
-            // Engine Flame Thrusters
-            val flamePath = Path().apply {
-                moveTo(p.x - 12f, p.y + halfH)
-                lineTo(p.x + 12f, p.y + halfH)
-                lineTo(p.x, p.y + halfH + Random.nextFloat() * 20f + 12f)
-                close()
-            }
-            drawPath(flamePath, color = DarkzCyanNeon.copy(alpha = 0.85f))
+            // Reusable Flame Thrusters
+            sharedFlamePath.reset()
+            sharedFlamePath.moveTo(p.x - 12f, p.y + halfH)
+            sharedFlamePath.lineTo(p.x + 12f, p.y + halfH)
+            sharedFlamePath.lineTo(p.x, p.y + halfH + 18f)
+            sharedFlamePath.close()
+            drawPath(sharedFlamePath, color = DarkzCyanNeon.copy(alpha = 0.85f))
 
-            // Ship Body - Sleek Delta Wing Fighter
-            val shipPath = Path().apply {
-                moveTo(p.x, p.y - halfH) // Nose
-                lineTo(p.x + halfW, p.y + halfH) // Right wing tip
-                lineTo(p.x + 10f, p.y + halfH * 0.6f) // Right thruster notch
-                lineTo(p.x, p.y + halfH * 0.4f) // Center notch
-                lineTo(p.x - 10f, p.y + halfH * 0.6f) // Left thruster notch
-                lineTo(p.x - halfW, p.y + halfH) // Left wing tip
-                close()
-            }
+            // Reusable Ship Body
+            sharedPlayerPath.reset()
+            sharedPlayerPath.moveTo(p.x, p.y - halfH)
+            sharedPlayerPath.lineTo(p.x + halfW, p.y + halfH)
+            sharedPlayerPath.lineTo(p.x + 10f, p.y + halfH * 0.6f)
+            sharedPlayerPath.lineTo(p.x, p.y + halfH * 0.4f)
+            sharedPlayerPath.lineTo(p.x - 10f, p.y + halfH * 0.6f)
+            sharedPlayerPath.lineTo(p.x - halfW, p.y + halfH)
+            sharedPlayerPath.close()
 
-            // Fill & Outline
-            drawPath(shipPath, color = DarkzRedPrimary)
-            drawPath(shipPath, color = DarkzWhite, style = Stroke(width = 2.5f))
+            drawPath(sharedPlayerPath, color = DarkzRedPrimary)
+            drawPath(sharedPlayerPath, color = DarkzWhite, style = Stroke(width = 2f))
 
             // Cockpit Canopy
             drawCircle(
@@ -420,16 +431,15 @@ class DarkzBattleEngine : GameEngine {
                 EnemyType.COMMUNITY_SPONSORED -> DarkzCyanNeon
             }
 
-            val path = Path().apply {
-                moveTo(e.x, e.y + halfH) // Front pointing down
-                lineTo(e.x + halfW, e.y - halfH)
-                lineTo(e.x, e.y - halfH * 0.4f)
-                lineTo(e.x - halfW, e.y - halfH)
-                close()
-            }
+            sharedEnemyPath.reset()
+            sharedEnemyPath.moveTo(e.x, e.y + halfH)
+            sharedEnemyPath.lineTo(e.x + halfW, e.y - halfH)
+            sharedEnemyPath.lineTo(e.x, e.y - halfH * 0.4f)
+            sharedEnemyPath.lineTo(e.x - halfW, e.y - halfH)
+            sharedEnemyPath.close()
 
-            drawPath(path, color = enemyColor)
-            drawPath(path, color = DarkzWhite, style = Stroke(width = 1.5f))
+            drawPath(sharedEnemyPath, color = enemyColor)
+            drawPath(sharedEnemyPath, color = DarkzWhite, style = Stroke(width = 1.5f))
 
             // Health bar over enemy
             val barW = e.width
@@ -454,30 +464,26 @@ class DarkzBattleEngine : GameEngine {
             val halfW = boss.width / 2f
             val halfH = boss.height / 2f
 
-            // Menacing Boss Structure
-            val hull = Path().apply {
-                moveTo(boss.x, boss.y + halfH)
-                lineTo(boss.x + halfW * 0.5f, boss.y + halfH * 0.7f)
-                lineTo(boss.x + halfW, boss.y)
-                lineTo(boss.x + halfW * 0.8f, boss.y - halfH)
-                lineTo(boss.x, boss.y - halfH * 0.6f)
-                lineTo(boss.x - halfW * 0.8f, boss.y - halfH)
-                lineTo(boss.x - halfW, boss.y)
-                lineTo(boss.x - halfW * 0.5f, boss.y + halfH * 0.7f)
-                close()
-            }
+            sharedBossPath.reset()
+            sharedBossPath.moveTo(boss.x, boss.y + halfH)
+            sharedBossPath.lineTo(boss.x + halfW * 0.5f, boss.y + halfH * 0.7f)
+            sharedBossPath.lineTo(boss.x + halfW, boss.y)
+            sharedBossPath.lineTo(boss.x + halfW * 0.8f, boss.y - halfH)
+            sharedBossPath.lineTo(boss.x, boss.y - halfH * 0.6f)
+            sharedBossPath.lineTo(boss.x - halfW * 0.8f, boss.y - halfH)
+            sharedBossPath.lineTo(boss.x - halfW, boss.y)
+            sharedBossPath.lineTo(boss.x - halfW * 0.5f, boss.y + halfH * 0.7f)
+            sharedBossPath.close()
 
-            drawPath(hull, color = Color(0xFF1F0004))
-            drawPath(hull, color = DarkzRedNeon, style = Stroke(width = 3f))
+            drawPath(sharedBossPath, color = Color(0xFF1F0004))
+            drawPath(sharedBossPath, color = DarkzRedNeon, style = Stroke(width = 3f))
 
-            // Reactor Core
             drawCircle(
                 color = if (boss.isChargingLaser) DarkzWhite else DarkzRedNeon,
                 radius = 24f,
                 center = Offset(boss.x, boss.y)
             )
 
-            // Boss Health Bar on top
             val barW = boss.width * 1.4f
             val barH = 10f
             val hpRatio = (boss.health / boss.maxHealth).coerceIn(0f, 1f)
@@ -508,78 +514,30 @@ class DarkzBattleEngine : GameEngine {
     }
 
     private fun shootPlayerWeapon() {
+        if (projectiles.size > 120) return // Limit max projectiles
         val isSpread = player.specialLaserTimer > 0
         if (isSpread) {
-            // Triple cannon spread
             projectiles.add(
-                Projectile(
-                    x = player.x,
-                    y = player.y - player.height / 2,
-                    vx = 0f,
-                    vy = -1200f,
-                    isPlayer = true,
-                    damage = 40f,
-                    radius = 6f,
-                    color = DarkzCyanNeon,
-                    isSpecialSpread = true
-                )
+                Projectile(x = player.x, y = player.y - player.height / 2, vx = 0f, vy = -1200f, isPlayer = true, damage = 40f, radius = 6f, color = DarkzCyanNeon, isSpecialSpread = true)
             )
             projectiles.add(
-                Projectile(
-                    x = player.x - 18f,
-                    y = player.y - player.height / 2,
-                    vx = -250f,
-                    vy = -1150f,
-                    isPlayer = true,
-                    damage = 35f,
-                    radius = 5f,
-                    color = DarkzRedNeon,
-                    isSpecialSpread = true
-                )
+                Projectile(x = player.x - 18f, y = player.y - player.height / 2, vx = -250f, vy = -1150f, isPlayer = true, damage = 35f, radius = 5f, color = DarkzRedNeon, isSpecialSpread = true)
             )
             projectiles.add(
-                Projectile(
-                    x = player.x + 18f,
-                    y = player.y - player.height / 2,
-                    vx = 250f,
-                    vy = -1150f,
-                    isPlayer = true,
-                    damage = 35f,
-                    radius = 5f,
-                    color = DarkzRedNeon,
-                    isSpecialSpread = true
-                )
+                Projectile(x = player.x + 18f, y = player.y - player.height / 2, vx = 250f, vy = -1150f, isPlayer = true, damage = 35f, radius = 5f, color = DarkzRedNeon, isSpecialSpread = true)
             )
         } else {
-            // Standard dual plasma blaster
             projectiles.add(
-                Projectile(
-                    x = player.x - 14f,
-                    y = player.y - player.height / 2,
-                    vx = 0f,
-                    vy = -950f,
-                    isPlayer = true,
-                    damage = 30f,
-                    radius = 4.5f,
-                    color = DarkzCyanNeon
-                )
+                Projectile(x = player.x - 14f, y = player.y - player.height / 2, vx = 0f, vy = -950f, isPlayer = true, damage = 30f, radius = 4.5f, color = DarkzCyanNeon)
             )
             projectiles.add(
-                Projectile(
-                    x = player.x + 14f,
-                    y = player.y - player.height / 2,
-                    vx = 0f,
-                    vy = -950f,
-                    isPlayer = true,
-                    damage = 30f,
-                    radius = 4.5f,
-                    color = DarkzCyanNeon
-                )
+                Projectile(x = player.x + 14f, y = player.y - player.height / 2, vx = 0f, vy = -950f, isPlayer = true, damage = 30f, radius = 4.5f, color = DarkzCyanNeon)
             )
         }
     }
 
     private fun shootEnemyWeapon(e: Enemy) {
+        if (projectiles.size > 120) return
         projectiles.add(
             Projectile(
                 x = e.x,
@@ -595,7 +553,7 @@ class DarkzBattleEngine : GameEngine {
     }
 
     private fun executeBossAttack(boss: Boss) {
-        // Multi-angle barrage
+        if (projectiles.size > 120) return
         for (angle in listOf(-300f, -150f, 0f, 150f, 300f)) {
             projectiles.add(
                 Projectile(
@@ -613,6 +571,7 @@ class DarkzBattleEngine : GameEngine {
     }
 
     private fun spawnEnemy(forcedType: EnemyType? = null, sponsor: String = "") {
+        if (enemies.size >= 12) return
         val type = forcedType ?: when (Random.nextInt(100)) {
             in 0..50 -> EnemyType.DRONE
             in 51..85 -> EnemyType.INTERCEPTOR
@@ -697,7 +656,7 @@ class DarkzBattleEngine : GameEngine {
 
     private fun defeatEnemy(e: Enemy) {
         enemies.remove(e)
-        createSparks(e.x, e.y, DarkzAmber, 12)
+        createSparks(e.x, e.y, DarkzAmber, 8)
         _scoreState.value += e.scoreValue * comboMultiplier
 
         waveKillCount++
@@ -712,7 +671,7 @@ class DarkzBattleEngine : GameEngine {
 
     private fun defeatBoss(boss: Boss) {
         activeBoss = null
-        createSparks(boss.x, boss.y, DarkzRedNeon, 40)
+        createSparks(boss.x, boss.y, DarkzRedNeon, 25)
         _scoreState.value += 5000L
         screenShake = 20f
         _waveState.value += 1
@@ -730,7 +689,7 @@ class DarkzBattleEngine : GameEngine {
     private fun createSparks(x: Float, y: Float, color: Color, count: Int) {
         for (i in 0 until count) {
             val angle = Random.nextFloat() * 6.28f
-            val spd = Random.nextFloat() * 220f + 60f
+            val spd = Random.nextFloat() * 180f + 40f
             particles.add(
                 Particle(
                     x = x,
@@ -738,9 +697,9 @@ class DarkzBattleEngine : GameEngine {
                     vx = kotlin.math.cos(angle) * spd,
                     vy = kotlin.math.sin(angle) * spd,
                     color = color,
-                    radius = Random.nextFloat() * 3f + 2f,
-                    lifeMs = Random.nextLong(300L, 700L),
-                    maxLifeMs = 700L
+                    radius = Random.nextFloat() * 2.5f + 1.5f,
+                    lifeMs = Random.nextLong(250L, 500L),
+                    maxLifeMs = 500L
                 )
             )
         }
@@ -749,13 +708,12 @@ class DarkzBattleEngine : GameEngine {
     override fun handleLiveEvent(event: LiveEvent) {
         when (event.type) {
             LiveEventType.LIKE -> {
-                // LIKE: Ativa Canhão Especial Spread e regenera 10 de escudo
                 player.specialLaserTimer = 6000L
                 player.shield = (player.shield + 10f).coerceAtMost(player.maxShield)
                 _scoreState.value += 100L
                 notices.add(
                     FloatingNotice(
-                        text = "LIKE de ${event.senderName}: CANHÃO TRIPLO ATIVADO!",
+                        text = "LIKE de ${event.senderName}: CANHÃO TRIPLO!",
                         x = width / 2f,
                         y = height * 0.7f,
                         color = DarkzCyanNeon
@@ -763,14 +721,13 @@ class DarkzBattleEngine : GameEngine {
                 )
             }
             LiveEventType.COMMENT -> {
-                // COMMENT: Invoca Inimigo Patrocinado com o nome do espectador
                 spawnEnemy(
                     forcedType = EnemyType.COMMUNITY_SPONSORED,
                     sponsor = event.senderName
                 )
                 notices.add(
                     FloatingNotice(
-                        text = "Invasor invocado por ${event.senderName}!",
+                        text = "Invasor: ${event.senderName}!",
                         x = width / 2f,
                         y = height * 0.4f,
                         color = DarkzAmber
@@ -778,18 +735,17 @@ class DarkzBattleEngine : GameEngine {
                 )
             }
             LiveEventType.GIFT -> {
-                // GIFT: Detona onda de choque EMP limpando todos os projéteis inimigos e causando dano em massa
                 projectiles.removeAll { !it.isPlayer }
                 for (e in enemies) {
                     e.health -= 80f
-                    createSparks(e.x, e.y, DarkzRedNeon, 6)
+                    createSparks(e.x, e.y, DarkzRedNeon, 4)
                 }
                 enemies.removeAll { it.health <= 0f }
                 activeBoss?.let { it.health -= 200f }
                 screenShake = 16f
                 notices.add(
                     FloatingNotice(
-                        text = "BOMBA EMP enviada por ${event.senderName}!",
+                        text = "BOMBA EMP por ${event.senderName}!",
                         x = width / 2f,
                         y = height * 0.5f,
                         color = DarkzGreenLive
@@ -797,7 +753,6 @@ class DarkzBattleEngine : GameEngine {
                 )
             }
             LiveEventType.SPECIAL_GIFT -> {
-                // SPECIAL_GIFT: Invoca imediatamente o Chefe Titã!
                 spawnBoss(summonedBy = event.senderName)
             }
         }
@@ -815,5 +770,8 @@ class DarkzBattleEngine : GameEngine {
         enemies.clear()
         projectiles.clear()
         particles.clear()
+        notices.clear()
+        stars.clear()
+        isInitialized = false
     }
 }
